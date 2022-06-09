@@ -1,6 +1,9 @@
 require('dotenv').config();
 const { Intents, Client } = require("discord.js");
 const { Hooks } = require('./modules/hooks.js');
+const express = require('express')
+const app = express()
+const PORT = process.env.PORT || 3000;
 
 const client = new Client({ intents: [
     Intents.FLAGS.GUILDS, 
@@ -22,3 +25,7 @@ client.on('error', error => {
 });
 
 client.login(process.env.TOKEN);
+
+app.listen(PORT, () => {
+    console.log(`Our app is running on port ${ PORT }`);
+});
