@@ -10,15 +10,8 @@ const db = new Postgres({
 });
 
 db.connect();
-
-db.query('DROP TABLE IF EXISTS TICKETS').then(() => {
-    db.query('CREATE TABLE IF NOT EXISTS TICKETS(ticketid SERIAL PRIMARY KEY, userid TEXT NOT NULL, name TEXT, iconurl TEXT, status SMALLINT NOT NULL, type TEXT, comment TEXT, imageurl TEXT, remarks TEXT, messageid TEXT, responseid TEXT NOT NULL, expire BIGINT)');
-});
-
-
-db.query('DROP TABLE IF EXISTS BLOCKED').then(() => {
-    db.query('CREATE TABLE IF NOT EXISTS BLOCKED(userid TEXT PRIMARY KEY NOT NULL UNIQUE, expire BIGINT)');
-});
+db.query('CREATE TABLE IF NOT EXISTS TICKETS(ticketid SERIAL PRIMARY KEY, userid TEXT NOT NULL, name TEXT, iconurl TEXT, status SMALLINT NOT NULL, type TEXT, comment TEXT, imageurl TEXT, remarks TEXT, messageid TEXT, responseid TEXT NOT NULL, expire BIGINT)');
+db.query('CREATE TABLE IF NOT EXISTS BLOCKED(userid TEXT PRIMARY KEY NOT NULL UNIQUE, expire BIGINT)');
 
 // Checks if user owns the ticket.
 function isOwner(ticketid, userid) {

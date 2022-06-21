@@ -1,6 +1,2 @@
 node_modules/**
-testing-config.json
-test-auth.json
 .env
-run.bat
-database_schema.txt
