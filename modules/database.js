@@ -1,22 +1,14 @@
 const EXPIRE = 1 // time in hours before a requested ticket expires or a resolved ticket can no longer be reopened. should probably be moved to config
 
-require('dotenv').config();
-const Postgres = require('pg').Client;
-const db = new Postgres({
-    connectionString: process.env.DATABASE_URL,
-  ssl: {
-    rejectUnauthorized: false
-  }
-});
-
-db.connect();
-db.query('CREATE TABLE IF NOT EXISTS TICKETS(ticketid SERIAL PRIMARY KEY, userid TEXT NOT NULL, name TEXT, iconurl TEXT, status SMALLINT NOT NULL, type TEXT, comment TEXT, imageurl TEXT, remarks TEXT, messageid TEXT, responseid TEXT NOT NULL, expire BIGINT)');
-db.query('CREATE TABLE IF NOT EXISTS BLOCKED(userid TEXT PRIMARY KEY NOT NULL UNIQUE, expire BIGINT)');
+const sqlite3 = require('sqlite3').verbose();
+var db = new sqlite3.Database('./database/tickets.db');
+db.run('CREATE TABLE IF NOT EXISTS TICKETS(ticketid INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, userid TEXT NOT NULL, name TEXT, iconurl TEXT, status INTEGER NOT NULL, type TEXT, comment TEXT, imageurl TEXT, remarks TEXT, messageid TEXT, responseid TEXT NOT NULL, expire INTEGER)');
+db.run('CREATE TABLE IF NOT EXISTS BLOCKED(userid TEXT PRIMARY KEY NOT NULL UNIQUE, expire INTEGER NOT NULL)');
 
 // Checks if user owns the ticket.
 function isOwner(ticketid, userid) {
     return new Promise((resolve, reject) => {
-        db.query('SELECT 1 FROM TICKETS WHERE ticketid=$1 AND userid=$2', [ticketid, userid], function(err, result) {
+        db.get('SELECT 1 FROM TICKETS WHERE ticketid=? AND userid=?', [ticketid, userid], function(err, result) {
             if (result) {
                 resolve(true);
             } else {
@@ -28,17 +20,13 @@ function isOwner(ticketid, userid) {
 
 module.exports = {
     isOwner,
-    initTables: function() {
-        
-    },
     createRequest: function(user, responseid) {
         return new Promise((resolve, reject) => {
-            db.query('INSERT INTO TICKETS (userid,name,iconurl,status,responseid,expire) VALUES($1,$2,$3,1,$4,$5) RETURNING ticketid', [user.id, user.username, user.displayAvatarURL(), responseid, new Date().getTime()+(EXPIRE*3600000)], function(err, result) { //3600000
+            db.run('INSERT INTO TICKETS (userid,name,iconurl,status,responseid,expire) VALUES(?,?,?,1,?,?)', [user.id, user.username, user.displayAvatarURL(), responseid, new Date().getTime()+(EXPIRE*3600000)], function(err) { //3600000
                 if (err) {
                     return reject(err);
                 }
-                console.log(result);
-                return resolve(result.rows[0].ticketid);
+                return resolve(this.lastID);
             });
 
         });
@@ -46,20 +34,20 @@ module.exports = {
     resetRequest: function(ticketid, userid, responseid) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET status=1, type=NULL, comment=NULL, remarks=NULL, messageid=NULL, responseid=$1, expire=$2 WHERE ticketid=$3', [responseid, new Date().getTime()+(EXPIRE*3600000), ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET status=1, type=NULL, comment=NULL, remarks=NULL, messageid=NULL, responseid=?, expire=? WHERE ticketid=?', [responseid, new Date().getTime()+(EXPIRE*3600000), ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
-                    return resolve();
+                    return resolve(this.lastID);
                 });
             }).catch(error => reject(error));
         });
     },
     getTicket: function(ticketid) {
         return new Promise((resolve, reject) => {
-            db.query('SELECT * FROM TICKETS WHERE ticketid=$1', [ticketid], function(err, result) {
-                if (result && result.rowCount) {
-                    return resolve(result.rows[0]);
+            db.get('SELECT * FROM TICKETS WHERE ticketid=?', [ticketid], function(err, result) {
+                if (result) {
+                    return resolve(result);
                 } else {
                     return reject(err);
                 }
@@ -68,9 +56,9 @@ module.exports = {
     },
     getRequest: function(userid) {
         return new Promise((resolve) => {
-            db.query('SELECT * FROM TICKETS WHERE userid=$1 AND (status=1 OR status=3)', [userid], function(err, result) {
-                if (result && result.rowCount) {
-                    return resolve(result.rows[0]);
+            db.get('SELECT * FROM TICKETS WHERE userid=? AND (status=1 OR status=3)', [userid], function(err, result) {
+                if (result) {
+                    return resolve(result);
                 } else {
                     return resolve(null);
                 }
@@ -79,9 +67,9 @@ module.exports = {
     },
     getMessage: function(ticketid) {
         return new Promise((resolve, reject) => {
-            db.query('SELECT ticketid id, userid user, messageid message FROM TICKETS WHERE ticketid=$1', [ticketid], function(err, result) {
-                if (result && result.rowCount) {
-                    return resolve(result.rows[0]);
+            db.get('SELECT ticketid id, userid user, messageid message FROM TICKETS WHERE ticketid=?', [ticketid], function(err, result) {
+                if (result) {
+                    return resolve(result);
                 } else {
                     return reject(err);
                 }
@@ -91,7 +79,7 @@ module.exports = {
     setStatus: function(ticketid, userid, status) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET status=$1 WHERE ticketid=$2', [status, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET status=? WHERE ticketid=?', [status, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -103,7 +91,7 @@ module.exports = {
     setType: function(ticketid, userid, type) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET type=$1 WHERE ticketid=$2', [type, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET type=? WHERE ticketid=?', [type, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -112,10 +100,10 @@ module.exports = {
             }).catch(error => reject(error));
         });
     }, 
-    setComment: function(ticketid, userid, comment, imageurl) {
+    setComment: function(ticketid, userid, comment) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET comment=$1, imageurl=$2 WHERE ticketid=$3', [comment, imageurl, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET comment=? WHERE ticketid=?', [comment, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -127,7 +115,7 @@ module.exports = {
     setResponse: function(ticketid, userid, responseid) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET responseid=$1 WHERE ticketid=$2', [responseid, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET responseid=? WHERE ticketid=?', [responseid, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -139,7 +127,7 @@ module.exports = {
     setMessage: function(ticketid, messageid) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET responseid=$1 WHERE ticketid=$2', [responseid, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET responseid=? WHERE ticketid=?', [responseid, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -151,7 +139,7 @@ module.exports = {
     submitTicket: function(ticketid, userid, messageid) {
         return new Promise((resolve, reject) => {
             isOwner(ticketid, userid).then(() => {
-                db.query('UPDATE TICKETS SET status=2, messageid=$1, expire=0 WHERE ticketid=$2', [messageid, ticketid], function(err, result) {
+                db.run('UPDATE TICKETS SET status=2, messageid=?, expire=0 WHERE ticketid=?', [messageid, ticketid], function(err) {
                     if (err) {
                         return reject(err);
                     }
@@ -162,7 +150,7 @@ module.exports = {
     },/* 
     resolveTicket: function(ticketid, status, responseid, remarks) {
         return new Promise((resolve, reject) => {
-            db.query('UPDATE TICKETS SET status=?, remarks=?, responseid=?, expire=? WHERE ticketid=?', [status, remarks, responseid, new Date().getTime()+(72*3600000), ticketid], function(err, result) {
+            db.run('UPDATE TICKETS SET status=?, remarks=?, responseid=?, expire=? WHERE ticketid=?', [status, remarks, responseid, new Date().getTime()+(72*3600000), ticketid], function(err) {
                 if (err) {
                     return reject('NO_TICKET');
                 }
@@ -172,7 +160,7 @@ module.exports = {
     },*/
     deleteTicket: function(ticketid) {
         return new Promise((resolve, reject) => {
-            db.query('DELETE FROM TICKETS WHERE ticketid=$1', [ticketid], function(err, result) {
+            db.run('DELETE FROM TICKETS WHERE ticketid=?', [ticketid], function(err) {
                 if (err) {
                     return reject(err);
                 } else {
@@ -183,9 +171,9 @@ module.exports = {
     },
     blockUser: function(userid, expire) {
         return new Promise((resolve, reject) => {
-            db.query('INSERT INTO BLOCKED(userid,expire) VALUES($1,$2)', [userid, new Date().getTime()+(expire*3600000)], function(err, result) {
+            db.run('INSERT INTO BLOCKED(userid,expire) VALUES(?,?)', [userid, new Date().getTime()+(expire*3600000)], function(err) {
                 if (err) {
-                    db.query('UPDATE BLOCKED SET expire=$1 WHERE userid=$2', [new Date().getTime()+(expire*3600000),userid], function(err, result) {
+                    db.run('UPDATE BLOCKED SET expire=? WHERE userid=?', [new Date().getTime()+(expire*3600000),userid], function(err) {
                         if (err) {
                             return reject(err);
                         }
@@ -199,9 +187,9 @@ module.exports = {
     },
     isBlocked: function(userid) {
         return new Promise((resolve) => {
-            db.query('SELECT 1 FROM BLOCKED WHERE userid=$1', [userid], function(err, result) {
-                if (result.rowCount) {
-                    resolve(true);
+            db.get('SELECT 1 FROM BLOCKED WHERE userid=?', [userid], function(err, result) {
+                if (result) {
+                    resolve(result);
                 }
                 resolve(false);
             });
@@ -209,7 +197,7 @@ module.exports = {
     },
     unblockUser: function(userid) {
         return new Promise((resolve, reject) => {
-            db.query('DELETE FROM BLOCKED WHERE userid=$1', [userid], function(err, result) {
+            db.run('DELETE FROM BLOCKED WHERE userid=?', [userid], function(err) {
                 if (err) {
                     reject(err);
                 }
@@ -220,9 +208,9 @@ module.exports = {
     expiredTickets: function() {
         const time = new Date().getTime();
         return new Promise((resolve, reject) => {
-            db.query('SELECT * FROM TICKETS WHERE status=1 AND expire<=$1 AND expire!=0', [time], function(err, result) {
-                if (result.rows) {
-                    resolve(result);
+            db.all('SELECT * FROM TICKETS WHERE status=1 AND expire<=? AND expire!=0', [time], function(err, rows) {
+                if (rows) {
+                    resolve(rows);
                 } else {
                     reject(err);
                 }
@@ -232,9 +220,9 @@ module.exports = {
     expiredBlocks: function() {
         const time = new Date().getTime();
         return new Promise((resolve, reject) => {
-            db.query('SELECT * FROM BLOCKED WHERE expire<=$1 AND expire!=0', [time], function(err, result) {
-                if (result.rows) {
-                    resolve(result);
+            db.all('SELECT * FROM BLOCKED WHERE expire<=? AND expire!=0', [time], function(err, rows) {
+                if (rows) {
+                    resolve(rows);
                 } else {
                     reject(err);
                 }

@@ -3,7 +3,7 @@ const { helpMsg, getContactEmbed, generateDmRequestEmbed, generateDmSubmittedEmb
 const db = require('./database.js');
 
 function Hooks(client) {
-    const expiration = setTimeout(function(){expiryTimeout(client)}, 3000);
+    const expiration = setTimeout(function(){expiryTimeout(client)}, 10000);
 
     client.on('messageCreate', message => {
         if (message.author.bot) return;
@@ -426,7 +426,7 @@ function closeTicket (message) {
 function expiryTimeout(client) {
     try {
     db.expiredTickets().then(result => {
-        for (let row of result.rows) {
+        for (let row of result) {
             db.deleteTicket(row.ticketid).then(() => {
                 fetchTicketResponse(client, row.userid, row.responseid).then(response=>{
                     response.edit({embeds:[generateDmExpiredEmbed()],components:[]});
@@ -437,7 +437,7 @@ function expiryTimeout(client) {
     });
 
     db.expiredBlocks().then(result => {
-        for (let row of result.rows) {
+        for (let row of result) {
             db.unblockUser(row.userid);
         }
     });
