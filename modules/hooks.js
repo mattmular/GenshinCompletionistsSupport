@@ -1,20 +1,19 @@
-const config = require('../config.json');
-const { getContactEmbed, generateDmRequestEmbed, generateDmSubmittedEmbed, generateDmExpiredEmbed, generateDmReplacedEmbed, generateDmBlockedEmbed, generateTicketResolvedEmbed, generateDmClosedEmbed, getContactAction, generateDmRequestAction, generateDmEditAction, generateTicketEmbed, generateTicketAction, generateDmResolvedEmbed, generateTicketClosedEmbed } = require('./source.js');
+require('dotenv').config();
+const { helpMsg, getContactEmbed, generateDmRequestEmbed, generateDmSubmittedEmbed, generateDmExpiredEmbed, generateDmReplacedEmbed, generateDmBlockedEmbed, generateTicketResolvedEmbed, generateDmClosedEmbed, getContactAction, generateDmRequestAction, generateDmEditAction, generateTicketEmbed, generateTicketAction, generateDmResolvedEmbed, generateTicketClosedEmbed, generateResolveModal } = require('./source.js');
 const db = require('./database.js');
 
 function Hooks(client) {
-    const expiration = expiryTimeout(client);
+    const expiration = setTimeout(function(){expiryTimeout(client)}, 3000);
 
     client.on('messageCreate', message => {
         if (message.author.bot) return;
         const content = message.content;
-        if (!content) return;
-        if (content.substring(0, 1) === '.') {
+        if (content && content.substring(0, 1) === '.') {
         const command = content.split(' ');
             switch(command[0]) {
                 case '.modmail-help':
                     isValid(message, message.author).then(() => {
-                        message.reply(config.Help);
+                        message.reply(helpMsg);
                     });
                     break;
                 case '.sendcontact':
@@ -32,7 +31,7 @@ function Hooks(client) {
                 case '.blocked':
                     listBlocked(message);
                     break;
-                case '.accept':
+               /* case '.accept':
                     resolveTicket(message, 5);
                     break;
                 case '.deny':
@@ -40,7 +39,7 @@ function Hooks(client) {
                     break;
                 case '.resolve':
                     resolveTicket(message, 4);
-                    break;
+                    break;*/
                 case '.close':
                     closeTicket(message);
                     break;
@@ -50,10 +49,22 @@ function Hooks(client) {
                 const commentErrorReply = 'Failed to submit comment, please request a new ticket.\nIf this problem persists please contact a moderator directly.\n';
                 db.getRequest(message.author.id).then(result => {
                     if (!result || !result.ticketid) return logErrorSafeReply(message, commentErrorReply+'`Error H042`', 'Error H042: Got null request object.\n'+error);
-                        db.setComment(result.ticketid, message.author.id, content.substring(0, 500)).then(() => {
+                        if (message.attachments.size && message.attachments.first().url) {
+                            result.imageurl = message.attachments.first().url;
+                        } else if (content) {
+                            var imageurl = content.match(/(https?:\/\/)\S+/g);
+                            if (imageurl) result.imageurl = imageurl[0]; 
+                        }
+                        
+                        if (content && result.imageurl) {
+                            result.comment = content.replace(result.imageurl, '');
+                        } else if (content) {
+                            result.comment = content.substring(0, 500);
+                        }
+
+                        db.setComment(result.ticketid, message.author.id, result.comment, result.imageurl).then(() => {
                             message.channel.messages.fetch(result.responseid).then(response => {
                                 if (response.embeds.length < 1) return logErrorSafeReply(message, commentErrorReply+'`Error H045`', 'Error H045: Failed to get request.\n'+error);
-                                result.comment = content.substring(0, 500);
                                 response.edit({embeds:[generateDmRequestEmbed(result)]}).then(() => {
                                     message.react('✅');
                                 }).catch(error => console.log('Error H046: Failed to edit response message.\n'+error));
@@ -65,15 +76,21 @@ function Hooks(client) {
     });
 
     client.on('interactionCreate', interaction => {
-        if (!interaction.isMessageComponent()) return;
+        if (!interaction.isMessageComponent() && interaction.type != 'MODAL_SUBMIT') return;
         if (interaction.customId.includes('OpenTicket')) { 
             openTicket(interaction);            
         } else if (interaction.customId.includes('AcceptTicket')) {
-            resolveTicketInteraction(interaction, 5);
+            resolveTicketModal(interaction, 5);
         }  else if (interaction.customId.includes('DenyTicket')) {
-            resolveTicketInteraction(interaction, 6);
+            resolveTicketModal(interaction, 6);
         }  else if (interaction.customId.includes('ResolveTicket')) {
-            resolveTicketInteraction(interaction, 4);
+            resolveTicketModal(interaction, 4);
+        }  else if (interaction.customId.includes('AcceptedModal')) {
+            resolveTicket(interaction, 5);
+        }  else if (interaction.customId.includes('DeniedModal')) {
+            resolveTicket(interaction, 6);
+        }  else if (interaction.customId.includes('ResolvedModal')) {
+            resolveTicket(interaction, 4);
         } else if (interaction.customId.includes('SetType')) {
             if (!interaction.isSelectMenu()) return;
             const typeErrorReply = 'Failed to submit type, please request a new ticket.\nIf this problem persists please contact a moderator directly.\n';
@@ -115,7 +132,7 @@ function Hooks(client) {
                         interaction.message.edit({embeds:[generateDmRequestEmbed(result)],components:generateDmRequestAction(id)}).then(() => {
                             return interaction.reply({content:'Your ticket is now being edited.', ephemeral:true});
                         }).catch(error => console.log('Error H059: Failed edit response message.\n'+error));
-                    }).catch(error => logErrorSafeReply(interaction, editErrorReply+'`Error H057`', 'Error H057: Failed to set status.\n'+error));
+                    }).catch(error => logErrorSafeReply(interaction, editErrorReply+'`Error H057`', 'Error H057: Failed to set status.\n'+error));ticketid
                 }).catch(error => logErrorSafeReply(interaction, editErrorReply+'`Error H054`', 'Error H054: Failed to get ticket.\n'+error));
             }).catch(error => logErrorSafeReply(interaction, editErrorReply+'`Error H080`', 'Error H080: Failed to get request.\n'+error));
         } else if (interaction.customId.includes('CancelTicket')) {
@@ -184,7 +201,7 @@ function submitTicket(interaction) {
 function sendSupportContact (message) {
     isValid(message, message.author).then(valid => {
         if (!valid) return;
-        message.client.channels.fetch(config.SupportChannelID).then(channel => {
+        message.client.channels.fetch(process.env.SupportChannelID).then(channel => {
             if (!channel) return;
             return channel.send({embeds:[getContactEmbed()],components:getContactAction()}).then(contact => {
                 if (contact) {
@@ -201,7 +218,7 @@ function sendSupportContact (message) {
 function updateSupportContact (message) {
     isValid(message, message.author).then(valid => {
         if (!valid) return;
-        message.client.channels.fetch(config.SupportChannelID).then(channel => { // Fetch support chanmel
+        message.client.channels.fetch(process.env.SupportChannelID).then(channel => { // Fetch support chanmel
             if (!channel) return logErrorReact(message, 'H004: Failed to fetch support channel.\n'+error)
             channel.messages.fetch({limit:100}).then(messages => { // Fetch all messages
                 if (!messages) return logErrorReact(message, 'H006: Failed to fetch support channel messages.\n'+error)
@@ -228,51 +245,9 @@ function updateSupportContact (message) {
 // .accept [message] : MOD/GUILD_REPLY : accepts the replied ticket and sends the user a message through dm anonymously
 // .deny [message] : MOD/GUILD_REPLY : denies the replied ticket and sends the user a message through dm anonymously
 // .resolve [message] : MOD/GUILD_REPLY : resolves the replied ticket and sends the user a message through dm anonymously
-function resolveTicket (message, status) {
-    isValid(message, message.author).then(valid => {
-        if (!valid) return;
-        try {
-            var ticket = message.reference.messageId;
-        } catch {
-            return message.react('❌');
-        }
-        
-        message.channel.messages.fetch(ticket).then(ticketmessage => {
-            if (ticketmessage.embeds.length < 0) return logErrorReact(message, 'H009: Referenced message doesn\'t have an embed.\n'+error);
-            const id = parseInt(ticketmessage.embeds[0].footer.text); 
-            if (!id) return logErrorReact(message, 'H010: Couldn\'t identify ticketID via footer.\n'+error);
 
-            db.getTicket(id).then(result => {
-                if (result.status && result.status == 3) return message.react('❌');
-                result.remarks = parseRemarks(message.content);
-                result.status = status;
-                if (message.author) {
-                    if (message.author.username) {
-                        var author = message.author.username;
-                    } else if (message.author.id) {
-                        var author = 'moderator. ID = ' + message.author.id;
-                    } else {
-                        var author = 'moderator'
-                    }
-                } else {
-                    var author = 'moderator'  
-                }
-                db.deleteTicket(id).then(() => {
-                    ticketmessage.edit({embeds:[generateTicketResolvedEmbed(result, author)],components:[]});
-                    fetchTicketResponse(message.client, result.userid, result.responseid).then(response => {
-                        response.delete().then(() => {
-                            return message.delete();
-                        }).catch(error => logErrorReact(message, 'H014: Failed to delete ticket response.\n'+error));
-                        response.channel.send({embeds:[generateDmResolvedEmbed(result)]});
-                    }).catch(error => logErrorReact(message, 'H013: Failed to fetch ticket response.\n'+error));
-                });     
-            }).catch(error => logErrorReact(message, 'H012: Ticket does not exist.\n'+error));
-        }).catch(error => logErrorReact(message, 'H011: Failed to fetch ticket.\n'+error));
-    });
-}
-
-function resolveTicketInteraction (interaction, status) {
-    if (!interaction.isButton()) return; 
+function resolveTicketModal (interaction, status) {
+    if (!interaction.isButton()) return;
     isValid(interaction, interaction.user).then(valid => {
         if (!valid) return;
         if (interaction.message.embeds.length < 0) return logErrorReply(interaction, 'Error H015: Message does not contain embeds.');
@@ -286,18 +261,11 @@ function resolveTicketInteraction (interaction, status) {
         db.getTicket(id).then(result => {
             if (result.status && result.status == 3) return interaction.reply({content:'The user is currently editing their ticket.',ephemeral:true});
             result.status = status;
-            if (interaction.user) {
-                if (interaction.user) {
-                    var author = interaction.user.username;
-                } else if (interaction.user.id) {
-                    var author = 'moderator. ID = ' + interaction.user.id;
-                } else {
-                    var author = 'moderator'
-                }
-            } else {
-                var author = 'moderator'  
-            }
-           
+            interaction.showModal(generateResolveModal(result.ticketid, status));
+
+            
+
+        /*
             db.deleteTicket(id).then(() => {
                 interaction.message.edit({embeds:[generateTicketResolvedEmbed(result, author)],components:[]}).catch(error => logErrorReply(interaction, 'Error H031: Failed to edit ticket embed\n', error));
                 fetchTicketResponse(interaction.client, result.userid, result.responseid).then(response => {
@@ -305,10 +273,52 @@ function resolveTicketInteraction (interaction, status) {
                     response.channel.send({embeds:[generateDmResolvedEmbed(result)],components:[]}).catch(error => logErrorReply(interaction, 'Error H022: Failed to send resolution message\n', error));
                     response.delete().catch(error => logErrorReply(interaction, 'Error H021: Failed to delete response\n', error));
                 }).catch(error => logErrorReply(interaction, 'Error H019: Failed to fetch ticket response\n', error));
-            }).catch(error => logErrorReply(interaction, 'Error H018: Failed to delete ticket ' + id + '\n', error)); 
+            }).catch(error => logErrorReply(interaction, 'Error H018: Failed to delete ticket ' + id + '\n', error)); */
         }).catch(error => logErrorReply(interaction, 'Error H017: Ticket doesn\'t exist.\n', error));
     });
 }
+
+function resolveTicket (interaction, status) {
+    if (interaction.type != 'MODAL_SUBMIT') return; 
+    isValid(interaction, interaction.user).then(valid => {
+        if (!valid) return;
+        const id = parseTicketId(interaction.customId);
+        if (!id) return logErrorReply(interaction, 'Error H069: Failed to parse ticket id.\n', error);
+    
+            db.getTicket(id).then(result => {
+                if (result.status && result.status == 3) return interaction.reply({content:'That ticket is currently being edited.',ephemeral:true});
+                result.remarks = interaction.fields.getTextInputValue('ModReply');
+                result.status = status;
+                if (interaction.user) {
+                    if (interaction.user.username) {
+                        var author = interaction.user.username;
+                    } else if (interaction.user.id) {
+                        var author = 'moderator. ID = ' + interaction.user.id;
+                    } else {
+                        var author = 'moderator'
+                    }
+                } else {
+                    var author = 'moderator'  
+                }
+                db.deleteTicket(id).then(async () => {
+                    if (interaction.message) {
+                        var ticketmessage = interaction.message
+                    } else {
+                        var ticketmessage = await fetchTicketMessage(interaction.client, result.messageid)
+                    }
+                    ticketmessage.edit({embeds:[generateTicketResolvedEmbed(result, author)],components:[]});
+                    fetchTicketResponse(interaction.client, result.userid, result.responseid).then(response => {
+                        response.delete();
+                        response.channel.send({embeds:[generateDmResolvedEmbed(result)]});
+                    }).catch(error => logErrorReply(interaction, 'H013: Failed to fetch ticket response.\n', error));
+                    interaction.reply({content:'Successfully resolved ticket',ephemeral:true});
+                });     
+            }).catch(error => logErrorReply(interaction, 'H012: Ticket does not exist.\n', error));
+
+    });
+}
+
+
 
 // .block [mention|user_id] [hours]: MOD/GUILD/DM : blocks user from opening tickets
 function blockUser (message) {
@@ -415,8 +425,8 @@ function closeTicket (message) {
 
 function expiryTimeout(client) {
     try {
-    db.expiredTickets().then(rows => {
-        for (let row of rows) {
+    db.expiredTickets().then(result => {
+        for (let row of result.rows) {
             db.deleteTicket(row.ticketid).then(() => {
                 fetchTicketResponse(client, row.userid, row.responseid).then(response=>{
                     response.edit({embeds:[generateDmExpiredEmbed()],components:[]});
@@ -426,8 +436,8 @@ function expiryTimeout(client) {
     
     });
 
-    db.expiredBlocks().then(rows => {
-        for (let row of rows) {
+    db.expiredBlocks().then(result => {
+        for (let row of result.rows) {
             db.unblockUser(row.userid);
         }
     });
@@ -439,10 +449,11 @@ function expiryTimeout(client) {
 //
 //////////////////////////////////////////////////////////
 // Sub Level Functions
+const modroles = process.env.ModeratorRoleIDs.split(',');
 function isValid (interaction, user) {
     return new Promise((resolve) => {
         if (interaction.member) {
-            if (config.ModeratorRoleID.some((r) => interaction.member.roles.cache.has(r))) {
+            if (modroles.some((r) => interaction.member.roles.cache.has(r))) {
                 resolve(true);
             } else {
                 resolve(false);
@@ -463,10 +474,10 @@ function isValid (interaction, user) {
 
 function fetchPrivlege (client, user) {
     return new Promise((resolve) => {
-        client.guilds.fetch(config.GuildID).then(guild => {
+        client.guilds.fetch(process.env.GuildID).then(guild => {
             if (!guild) return resolve(false);
             guild.members.fetch(user.id).then(member => {
-                if (member && config.ModeratorRoleID.some((r) => member.roles.cache.has(r))) {
+                if (member && modroles.some((r) => member.roles.cache.has(r))) {
                     resolve(true);
                 } else {
                     resolve(false);
@@ -503,7 +514,7 @@ function fetchTicketMessage(client, id) {
 
 function fetchTicketChannel(client) {
     return new Promise((resolve, reject) => {
-        client.channels.fetch(config.TicketChannelID).then(channel => {
+        client.channels.fetch(process.env.TicketChannelID).then(channel => {
             if (!channel) return reject('fetchTicketResponse -> undefined message recieved'); 
             resolve(channel);
         }).catch(error => reject(error));

@@ -1,4 +1,6 @@
-const { MessageEmbed, MessageActionRow, MessageButton, MessageSelectMenu } = require('discord.js');
+const { MessageEmbed, MessageActionRow, MessageButton, MessageSelectMenu, Modal, TextInputComponent } = require('discord.js');
+
+const helpMsg = "```asciidoc\n= General Commands =\n .modmail-help :: Displays this help screen\n .sendcontact :: Sends the support contact message to the support channel\n .updatecontact :: Scans for and updates the support contact message to the current configuration\n .block [mention|userID] [hours] :: Blocks a user from creating new requests\n .unblock [mention|userID] :: Unblocks a user from creating new requests\n\n= Ticket Handlers =\nMust be sent as a reply to a ticket\n .resolve [remarks] :: Resolves a ticket\n .accept [remarks] :: Accepts a ticket\n .deny [remarks] :: Denies a ticket\n .close [remarks] :: Closes a ticket (should only be used for illegal or corrupted tickets)\n```";
 
 const intToStatus = {
     1: "Requested",
@@ -44,7 +46,7 @@ const statusToColor = {
     Unknown: "#36393E"
 }
 
-
+const resolve = new Modal().setCustomId;
 
 // -- EMBEDS -- \\\
 function getContactEmbed() {
@@ -66,6 +68,7 @@ function generateDmRequestEmbed(params) {
             { name: 'Type', value: params.type},  
             { name: 'Comment', value: params.comment},
         )
+        .setImage(params.imageurl)
         .setTimestamp();
 }
 
@@ -82,6 +85,7 @@ function generateDmSubmittedEmbed(params) {
             { name: '\u200B', value: '\u200B' },
             { name: 'Thank You', value: 'Your request is under review.'}
         )
+        .setImage(params.imageurl)
         .setTimestamp();
 }
 
@@ -98,6 +102,7 @@ function generateDmResolvedEmbed(params) {
             { name: '\u200B', value: '\u200B' },
             { name: 'Your Request was '+ status, value: '"' + params.remarks + '"' }
         )
+        .setImage(params.imageurl)
         .setTimestamp();
 }
 
@@ -145,6 +150,7 @@ function generateTicketEmbed(params) {
         .setColor(statusToColor[status])
         .setThumbnail(statusToUrl[status])
         .setDescription(params.comment)
+        .setImage(params.imageurl)
         .setFooter({text:params.ticketid.toString()})
         .setTimestamp();
 }
@@ -155,7 +161,7 @@ function generateTicketResolvedEmbed(params, author) {
     var status = params.status ? intToStatus[params.status] : 'UNKNOWN';
     if (!params.type) params.type = 'UNKNOWN';
     if (!params.comment) params.comment = 'UNKNOWN';
-    if (!params.remarks) params.remarks = '*no remarks*'; 
+    params.remakrs = params.remarks ? '"' + params.remarks + '"' : '*no remarks*'; 
     return new MessageEmbed()
         .setAuthor({name: params.name, iconURL: params.iconurl})
         .setTitle(params.type)
@@ -165,8 +171,9 @@ function generateTicketResolvedEmbed(params, author) {
         .setFooter({text:params.ticketid.toString()})
         .addFields(
             { name: '\u200B', value: '\u200B' },
-            { name: status + ' by ' + author, value: '"' + params.remarks + '"' }
+            { name: status + ' by ' + author, value: params.remarks }
         )
+        .setImage(params.imageurl)
         .setTimestamp();
 }
 
@@ -239,8 +246,24 @@ function generateTicketAction(id) {
     )];
 }
 
+function generateResolveModal(id, status) {
+    var status = status ? intToStatus[status] : 'Resolved';
+    return new Modal()
+        .setCustomId(status+'Modal-'+id)
+        .setTitle(status + ' Ticket')
+        .addComponents(new MessageActionRow()
+            .addComponents(
+                new TextInputComponent()
+                    .setCustomId('ModReply')
+                    .setLabel('Reply (Anonymous)')
+                    .setStyle('PARAGRAPH')
+            )
+        );
+
+}
 
 module.exports = {
+    helpMsg,
     getContactEmbed,
     generateDmRequestEmbed,
     generateDmSubmittedEmbed,
@@ -256,5 +279,6 @@ module.exports = {
     getContactAction,
     generateDmRequestAction,
     generateDmEditAction,
-    generateTicketAction
+    generateTicketAction,
+    generateResolveModal
 };
